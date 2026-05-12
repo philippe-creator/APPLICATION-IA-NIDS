@@ -1,0 +1,205 @@
+# ============================================================================
+# Docker Compose Industriel - NIDS Cyber-IA
+# ============================================================================
+# Configuration pour déploiement industriel avec monitoring avancé
+# Services: Redis, Prometheus, Grafana, Module A/B, Dashboard
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # Redis pour cache et monitoring
+  redis:
+    image: redis:7-alpine
+    container_name: nids_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - nids_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus pour métriques
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nids_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - nids_network
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  # Grafana pour dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nids_grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=industrial123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    networks:
+      - nids_network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # Module B - Industrial Security Engine
+  module_b_industrial:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: nids_module_b
+    command: python -m uvicorn main_industrial:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - MODELS_DIR=/app/models
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-industrial-secret-key-change-in-production}
+      - MODULE_B_URL=http://module_b_industrial:8000
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    networks:
+      - nids_network
+    depends_on:
+      - redis
+      - prometheus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Module A - Industrial API Métier
+  module_a_industrial:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: nids_module_a
+    command: python -m uvicorn module_a:app --host 0.0.0.0 --port 9000 --reload
+    environment:
+      - MODULE_B_URL=http://module_b_industrial:8000
+      - MODULE_A_JWT_SECRET=${MODULE_A_JWT_SECRET:-industrial-jwt-secret-change}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+    ports:
+      - "9000:9000"
+    networks:
+      - nids_network
+    depends_on:
+      - module_b_industrial
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Dashboard Industriel
+  dashboard_industrial:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: nids_dashboard
+    command: streamlit run dashboard_industrial.py --server.port 8501 --server.address 0.0.0.0 --server.enableCORS=false
+    environment:
+      - MODULE_B_URL=http://module_b_industrial:8000
+      - MODULE_A_URL=http://module_a_industrial:9000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "8501:8501"
+    networks:
+      - nids_network
+    depends_on:
+      - module_b_industrial
+      - module_a_industrial
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Elasticsearch pour logs (optionnel)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: nids_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - nids_network
+    restart: unless-stopped
+
+  # Kibana pour visualisation des logs (optionnel)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: nids_kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - nids_network
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+# Volumes pour persistance des données
+volumes:
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+
+# Réseau Docker
+networks:
+  nids_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

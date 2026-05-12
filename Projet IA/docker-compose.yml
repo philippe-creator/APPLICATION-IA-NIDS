@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  module_b:
+    build: .
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000
+    environment:
+      - MODELS_DIR=/app/models
+    volumes:
+      - ./models:/app/models
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  module_a:
+    build: .
+    command: python -m uvicorn module_a:app --host 0.0.0.0 --port 9000
+    environment:
+      - MODULE_B_URL=http://module_b:8000
+      - MODULE_A_JWT_SECRET=change-me
+    ports:
+      - "9000:9000"
+    depends_on:
+      - module_b
+
+  dashboard:
+    build: .
+    command: streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      - MODULE_B_URL=http://module_b:8000
+      - MODULE_A_URL=http://module_a:9000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - module_b
+      - module_a

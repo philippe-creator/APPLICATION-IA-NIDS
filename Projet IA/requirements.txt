@@ -1,0 +1,46 @@
+# ============================================================================
+# Module B — Security Engine | Dépendances Python
+# ============================================================================
+# pip install -r requirements.txt
+# ============================================================================
+
+# Data Science & ML
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+imbalanced-learn>=0.11.0
+xgboost>=2.0.0
+lightgbm>=4.0.0
+
+# Deep Learning (Auto-encodeur)
+tensorflow>=2.15.0
+
+# Explicabilité
+shap>=0.43.0
+
+# API
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
+
+# HTTP client (Module A -> Module B)
+httpx>=0.27.0
+
+# Auth (JWT)
+python-jose[cryptography]>=3.3.0
+
+# Dashboard Admin
+streamlit>=1.34.0
+plotly>=5.20.0
+
+# Reporting (incident TeX/PDF)
+pylatex>=1.4.2
+
+# Cache / Queue (optionnel, recommandé CdC)
+redis>=5.0.0
+
+# Sérialisation
+joblib>=1.3.0
+
+# Environnement
+python-dotenv>=1.0.0
